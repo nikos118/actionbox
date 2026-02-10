@@ -1,0 +1,38 @@
+{
+  "id": "actionbox",
+  "name": "ActionBox",
+  "description": "Behavioral contracts for AI agent skills — generates, reviews, and enforces security boundaries",
+  "version": "0.1.0",
+  "main": "dist/plugin.js",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "mode": {
+        "type": "string",
+        "enum": ["monitor", "enforce"],
+        "default": "monitor",
+        "description": "Enforcement mode: monitor (alert only) or enforce (block violations)"
+      },
+      "skillsDir": {
+        "type": "string",
+        "default": "skills",
+        "description": "Directory containing skill definitions"
+      },
+      "autoGenerate": {
+        "type": "boolean",
+        "default": false,
+        "description": "Auto-generate boxes for new skills"
+      },
+      "generatorModel": {
+        "type": "string",
+        "default": "claude-sonnet-4-5-20250929",
+        "description": "Model for ActionBox generation"
+      },
+      "driftCheckInterval": {
+        "type": "number",
+        "default": 300000,
+        "description": "Drift check interval in milliseconds"
+      }
+    }
+  }
+}

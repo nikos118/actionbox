@@ -47,6 +47,25 @@ ActionBox doesn't blindly trust its own output. Generation uses two LLM passes:
 
 The result is a contract that's been both authored and attacked before a human ever sees it.
 
+### Multi-Skill Enforcement
+
+OpenClaw loads all eligible skills simultaneously — there's no "one skill at a time." ActionBox handles this by building a **global policy** from all loaded contracts:
+
+- **Tool attribution** — each contract lists its `allowedTools`. ActionBox builds an index mapping tool names to the contracts that claim them. When a tool call comes in, it finds the claiming contract(s) and checks their rules.
+- **Global denials** — if a tool is in any contract's `deniedTools` and not in any contract's `allowedTools`, it's globally blocked. Filesystem denied patterns (like `~/.ssh/**`) and network denied hosts (like `*.onion`) from ALL contracts are merged and always enforced.
+- **Generous on allows** — if multiple skills claim a tool, the call is permitted as long as ANY claiming contract's rules allow it. This avoids false positives in multi-skill environments.
+
+```
+                      ┌─────────────────────────┐
+                      │     Global Policy        │
+                      │                          │
+  Contract A ────────>│  Tool Index              │
+  Contract B ────────>│  Global Denied Tools     │──── before_tool_call ──── Block / Allow
+  Contract C ────────>│  Global Denied Paths     │──── after_tool_call  ──── Log / Alert
+                      │  Global Denied Hosts     │
+                      └─────────────────────────┘
+```
+
 ---
 
 ## Quick Start
@@ -208,9 +227,9 @@ drift:
 
 ### Enforcement Modes
 
-**Monitor mode** (default) — violations are logged and alerts are sent, but skill execution continues. Good for rollout and tuning.
+**Monitor mode** (default) — violations are logged via `after_tool_call`, but skill execution continues. Good for rollout and tuning.
 
-**Enforce mode** — violations block the tool call before it executes. Requires OpenClaw's `before_tool_call` hook support (coming soon; currently ActionBox uses post-hoc `agent_end` checking).
+**Enforce mode** — violations block the tool call via `before_tool_call` before it executes. Both hooks run simultaneously: `before_tool_call` for blocking, `after_tool_call` for logging.
 
 ### Drift Detection
 
@@ -272,8 +291,11 @@ ActionBox exports its core modules for use in your own code:
 import {
   ActionBoxEnforcer,
   matchToolCall,
+  buildGlobalPolicy,
   checkFilesystemAccess,
   checkNetworkAccess,
+  extractPaths,
+  extractHosts,
   parseActionBox,
   serializeActionBox,
   generateActionBox,
@@ -281,17 +303,18 @@ import {
   sha256,
 } from "@openclaw/plugin-actionbox";
 
-// Load and enforce
+// Load contracts and enforce
 const enforcer = new ActionBoxEnforcer("monitor");
-await enforcer.loadBox("./skills/calendar-sync");
+await enforcer.loadBoxes(["./skills/calendar-sync", "./skills/github-triage"]);
 
-const violations = enforcer.check({
-  skillId: "calendar-sync",
-  toolName: "shell_exec",
-  arguments: { command: "rm -rf /" },
-  timestamp: new Date().toISOString(),
-});
+// Check a tool call (params are extracted automatically)
+const violations = enforcer.check("shell_exec", { command: "rm -rf /" });
 // => [{ severity: "critical", type: "denied_tool", ... }]
+
+// Access the global policy directly
+const policy = enforcer.getPolicy();
+console.log(policy.globalDeniedTools); // tools denied across all contracts
+console.log(policy.toolIndex);         // tool name → claiming skill IDs
 ```
 
 ---
@@ -309,8 +332,10 @@ actionbox/
 │   │   ├── prompts.ts           # Two-pass LLM prompt templates
 │   │   └── generate.ts          # Generation orchestration
 │   ├── enforcer/
+│   │   ├── param-extractor.ts   # Extract paths/hosts from tool params
+│   │   ├── policy.ts            # Global policy engine (multi-skill merge)
 │   │   ├── path-matcher.ts      # Glob matching for paths and hosts
-│   │   ├── matcher.ts           # Tool call → violation matching
+│   │   ├── matcher.ts           # Tool call → policy violation matching
 │   │   └── enforcer.ts          # Enforcer class with caching
 │   ├── alerter/
 │   │   ├── formatters.ts        # Plain text / Markdown / Slack formatters
@@ -335,6 +360,7 @@ actionbox/
 │       ├── calendar.actionbox.md
 │       ├── github-triage.actionbox.md
 │       └── slack-standup.actionbox.md
+├── openclaw.plugin.json          # OpenClaw plugin manifest
 ├── package.json
 ├── tsconfig.json
 ├── tsup.config.ts
@@ -372,11 +398,11 @@ npm run typecheck
 
 ### Test Coverage
 
-57 tests across 4 test files covering:
+61 tests across 4 test files covering:
 
 - **Generator** — SKILL.md parsing, prompt construction, YAML extraction
 - **Enforcer** — Box loading, caching, agent_end checking, drift detection
-- **Matcher** — Tool matching, filesystem violations, network violations
+- **Matcher** — Multi-skill policy matching, tool attribution, filesystem/network violations
 - **Path Matcher** — Glob patterns, host wildcards, edge cases
 
 ---

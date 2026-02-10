@@ -1,97 +1,175 @@
 import { randomUUID } from "node:crypto";
-import type { ActionBox, Violation, ViolationType, ViolationSeverity } from "../types.js";
-import type { ToolCallEvent } from "../openclaw-sdk.js";
-import { checkFilesystemAccess, checkNetworkAccess, pathMatchesAny } from "./path-matcher.js";
+import type { Violation, ViolationType, ViolationSeverity } from "../types.js";
+import type { GlobalPolicy } from "./policy.js";
+import { attributeToolToSkills } from "./policy.js";
+import {
+  checkFilesystemAccess,
+  checkNetworkAccess,
+  pathMatchesAny,
+} from "./path-matcher.js";
+import {
+  extractPaths,
+  extractHosts,
+  inferFileOperation,
+} from "./param-extractor.js";
 
 /**
- * Match a tool call against an ActionBox and return any violations found.
+ * Check a tool call against the global policy.
+ * Returns any violations found.
+ *
+ * Multi-skill strategy:
+ * 1. Globally denied tools (denied by any, allowed by none) → critical
+ * 2. Unlisted tools (not in any contract's allowedTools) → high
+ * 3. Global denied paths (union of all contracts) → critical
+ * 4. Per-skill filesystem/network checks for claiming contracts → high if ALL fail
  */
 export function matchToolCall(
-  event: ToolCallEvent,
-  box: ActionBox,
+  toolName: string,
+  params: Record<string, unknown>,
+  policy: GlobalPolicy,
 ): Violation[] {
   const violations: Violation[] = [];
 
-  // Check denied tools (critical severity)
-  const denied = box.deniedTools.find((d) => d.name === event.toolName);
+  // 1. Check globally denied tools
+  const denied = policy.globalDeniedTools.get(toolName);
   if (denied) {
     violations.push(
       createViolation({
         type: "denied_tool",
         severity: "critical",
-        skillId: event.skillId,
-        toolName: event.toolName,
-        message: `Tool "${event.toolName}" is explicitly denied: ${denied.reason}`,
-        rule: `deniedTools: ${denied.name}`,
+        skillId: denied.denyingSkills.join(", "),
+        toolName,
+        message: `Tool "${toolName}" is explicitly denied: ${denied.reason}`,
+        rule: `deniedTools: ${toolName}`,
       }),
     );
-    return violations; // No need to check further for a denied tool
+    return violations; // Denied tool — stop here
   }
 
-  // Check if tool is in allowed list (high severity if not)
-  const allowed = box.allowedTools.find((a) => a.name === event.toolName);
-  if (!allowed) {
+  // 2. Check if tool is known by any contract
+  const claimingSkills = attributeToolToSkills(toolName, policy);
+  if (claimingSkills.length === 0 && policy.boxes.size > 0) {
     violations.push(
       createViolation({
         type: "unlisted_tool",
         severity: "high",
-        skillId: event.skillId,
-        toolName: event.toolName,
-        message: `Tool "${event.toolName}" is not in the allowed tools list`,
-        rule: "allowedTools",
+        skillId: "unknown",
+        toolName,
+        message: `Tool "${toolName}" is not listed in any loaded ActionBox contract`,
+        rule: "allowedTools (all contracts)",
       }),
     );
   }
 
-  // Check filesystem access
-  if (event.resolvedPaths) {
-    for (const filePath of event.resolvedPaths) {
-      // Determine operation type based on tool name heuristics
-      const operation = inferFileOperation(event.toolName);
-      const fsViolation = checkFilesystemAccess(
-        filePath,
-        operation,
-        box.filesystem,
+  // 3. Extract paths and hosts from params
+  const paths = extractPaths(toolName, params);
+  const hosts = extractHosts(params);
+
+  // 4. Check global denied paths (union of all contracts)
+  for (const filePath of paths) {
+    if (pathMatchesAny(filePath, policy.globalDeniedPaths)) {
+      violations.push(
+        createViolation({
+          type: "filesystem_denied",
+          severity: "critical",
+          skillId: claimingSkills[0] ?? "unknown",
+          toolName,
+          message: `Path "${filePath}" matches a globally denied filesystem pattern`,
+          rule: "filesystem.denied (global)",
+          details: { path: filePath },
+        }),
       );
+    }
+  }
 
-      if (fsViolation) {
-        const isDeniedPath = pathMatchesAny(filePath, box.filesystem.denied);
+  // 5. Check global denied hosts (union of all contracts)
+  for (const host of hosts) {
+    const globalNetResult = checkNetworkAccess(host, {
+      allowedHosts: [],
+      deniedHosts: policy.globalDeniedHosts,
+    });
+    if (globalNetResult) {
+      violations.push(
+        createViolation({
+          type: "network_violation",
+          severity: "critical",
+          skillId: claimingSkills[0] ?? "unknown",
+          toolName,
+          message: globalNetResult,
+          rule: "network.deniedHosts (global)",
+          details: { host },
+        }),
+      );
+    }
+  }
+
+  // 6. Per-skill filesystem/network checks for claiming contracts
+  // A path/host is allowed if ANY claiming contract permits it
+  if (claimingSkills.length > 0) {
+    const operation = inferFileOperation(toolName);
+
+    for (const filePath of paths) {
+      // Skip if already flagged as globally denied
+      if (pathMatchesAny(filePath, policy.globalDeniedPaths)) continue;
+
+      let anyContractAllows = false;
+      for (const skillId of claimingSkills) {
+        const box = policy.boxes.get(skillId)!;
+        const result = checkFilesystemAccess(filePath, operation, box.filesystem);
+        if (result === null) {
+          anyContractAllows = true;
+          break;
+        }
+      }
+
+      if (!anyContractAllows) {
         const type: ViolationType =
-          isDeniedPath
-            ? "filesystem_denied"
-            : operation === "write"
-              ? "filesystem_write_violation"
-              : "filesystem_read_violation";
-
+          operation === "write" ? "filesystem_write_violation" : "filesystem_read_violation";
         violations.push(
           createViolation({
             type,
-            severity: type === "filesystem_denied" ? "critical" : "high",
-            skillId: event.skillId,
-            toolName: event.toolName,
-            message: fsViolation,
+            severity: "high",
+            skillId: claimingSkills.join(", "),
+            toolName,
+            message: `${operation === "write" ? "Write" : "Read"} access to "${filePath}" is not permitted by any claiming contract`,
             rule: `filesystem.${operation === "write" ? "writable" : "readable"}`,
-            details: { path: filePath },
+            details: { path: filePath, claimingSkills },
           }),
         );
       }
     }
-  }
 
-  // Check network access
-  if (event.networkHosts) {
-    for (const host of event.networkHosts) {
-      const netViolation = checkNetworkAccess(host, box.network);
-      if (netViolation) {
+    for (const host of hosts) {
+      // Skip if already flagged as globally denied
+      if (
+        checkNetworkAccess(host, {
+          allowedHosts: [],
+          deniedHosts: policy.globalDeniedHosts,
+        }) !== null
+      ) {
+        continue;
+      }
+
+      let anyContractAllows = false;
+      for (const skillId of claimingSkills) {
+        const box = policy.boxes.get(skillId)!;
+        const result = checkNetworkAccess(host, box.network);
+        if (result === null) {
+          anyContractAllows = true;
+          break;
+        }
+      }
+
+      if (!anyContractAllows) {
         violations.push(
           createViolation({
             type: "network_violation",
             severity: "high",
-            skillId: event.skillId,
-            toolName: event.toolName,
-            message: netViolation,
+            skillId: claimingSkills.join(", "),
+            toolName,
+            message: `Host "${host}" is not permitted by any claiming contract`,
             rule: "network.allowedHosts",
-            details: { host },
+            details: { host, claimingSkills },
           }),
         );
       }
@@ -99,27 +177,6 @@ export function matchToolCall(
   }
 
   return violations;
-}
-
-/**
- * Infer whether a tool call is a read or write filesystem operation.
- */
-function inferFileOperation(
-  toolName: string,
-): "read" | "write" {
-  const writeTools = [
-    "write_file",
-    "create_file",
-    "edit_file",
-    "delete_file",
-    "move_file",
-    "copy_file",
-    "mkdir",
-    "write",
-    "patch",
-  ];
-  const lowerName = toolName.toLowerCase();
-  return writeTools.some((w) => lowerName.includes(w)) ? "write" : "read";
 }
 
 function createViolation(params: {

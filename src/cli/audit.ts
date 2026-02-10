@@ -5,9 +5,11 @@ import { basename } from "node:path";
 import { discoverSkillDirs, actionBoxPath, skillMdPath } from "../utils/config.js";
 import { parseActionBox } from "../utils/yaml.js";
 import { sha256 } from "../utils/hash.js";
+import type { PluginLogger } from "../openclaw-sdk.js";
 
 export interface AuditCommandOptions {
   skillsDir: string;
+  logger: PluginLogger;
 }
 
 interface AuditRow {
@@ -23,13 +25,13 @@ interface AuditRow {
  * Audit all skills — show a table with box status and drift detection.
  */
 export async function runAudit(options: AuditCommandOptions): Promise<void> {
-  const { skillsDir } = options;
+  const { skillsDir, logger } = options;
 
-  console.log(chalk.blue("Auditing skills...\n"));
+  logger.info(chalk.blue("Auditing skills...\n"));
   const skillDirs = await discoverSkillDirs(skillsDir);
 
   if (skillDirs.length === 0) {
-    console.log(chalk.yellow("No skills found."));
+    logger.warn("No skills found.");
     return;
   }
 
@@ -94,16 +96,10 @@ export async function runAudit(options: AuditCommandOptions): Promise<void> {
   const drifted = rows.filter((r) => r.drift).length;
   const unreviewed = rows.filter((r) => r.hasBox && !r.reviewed).length;
 
-  if (noBox > 0) {
-    console.log(chalk.yellow(`\n${noBox} skill(s) missing ActionBox.`));
-  }
-  if (drifted > 0) {
-    console.log(chalk.red(`${drifted} skill(s) with drift detected.`));
-  }
-  if (unreviewed > 0) {
-    console.log(chalk.yellow(`${unreviewed} skill(s) not yet reviewed.`));
-  }
+  if (noBox > 0) logger.warn(`${noBox} skill(s) missing ActionBox.`);
+  if (drifted > 0) logger.warn(`${drifted} skill(s) with drift detected.`);
+  if (unreviewed > 0) logger.warn(`${unreviewed} skill(s) not yet reviewed.`);
   if (noBox === 0 && drifted === 0 && unreviewed === 0) {
-    console.log(chalk.green("\nAll skills have reviewed, up-to-date ActionBoxes."));
+    logger.info(chalk.green("All skills have reviewed, up-to-date ActionBoxes."));
   }
 }

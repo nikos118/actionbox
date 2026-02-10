@@ -15,7 +15,7 @@ function readFixture(name: string): string {
 }
 
 describe("parseSkillMd", () => {
-  it("parses a valid SKILL.md with frontmatter", () => {
+  it("parses a valid SKILL.md with id and name in frontmatter", () => {
     const content = readFixture("calendar-skill.md");
     const result = parseSkillMd(content);
 
@@ -26,9 +26,21 @@ describe("parseSkillMd", () => {
     expect(result.raw).toBe(content);
   });
 
-  it("throws if frontmatter is missing id", () => {
-    const content = "---\nname: Test\n---\n# Body";
-    expect(() => parseSkillMd(content)).toThrow("'id' field");
+  it("parses OpenClaw-style SKILL.md without id (uses fallback)", () => {
+    const content = readFixture("openclaw-style-skill.md");
+    const result = parseSkillMd(content, "merge-pr");
+
+    expect(result.skillId).toBe("merge-pr");
+    expect(result.skillName).toBe("Merge PR");
+    expect(result.body).toContain("Squash-merges");
+  });
+
+  it("uses name as skillId when no id and no fallback", () => {
+    const content = readFixture("openclaw-style-skill.md");
+    const result = parseSkillMd(content);
+
+    expect(result.skillId).toBe("Merge PR");
+    expect(result.skillName).toBe("Merge PR");
   });
 
   it("throws if frontmatter is missing name", () => {

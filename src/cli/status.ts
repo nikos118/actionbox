@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import Table from "cli-table3";
 import type { ActionBoxConfig, Violation } from "../types.js";
+import type { PluginLogger } from "../openclaw-sdk.js";
 
 // In-memory violation log for the current session
 const recentViolations: Violation[] = [];
@@ -28,8 +29,11 @@ export function recordViolations(violations: Violation[]): void {
 /**
  * Show enforcement status, config, and recent violations.
  */
-export async function runStatus(config: ActionBoxConfig): Promise<void> {
-  console.log(chalk.blue("ActionBox Status\n"));
+export async function runStatus(
+  config: ActionBoxConfig,
+  logger: PluginLogger,
+): Promise<void> {
+  logger.info(chalk.blue("ActionBox Status\n"));
 
   // Config
   const configTable = new Table();
@@ -39,15 +43,14 @@ export async function runStatus(config: ActionBoxConfig): Promise<void> {
     { "Auto-generate": config.autoGenerate ? "yes" : "no" },
     { "Generator model": config.generatorModel },
     { "Drift check interval": `${config.driftCheckInterval / 1000}s` },
-    { "Alert channel": config.alertChannel ?? "(none)" },
   );
   console.log(configTable.toString());
 
   // Recent violations
-  console.log(chalk.blue(`\nRecent Violations (${recentViolations.length})\n`));
+  logger.info(chalk.blue(`\nRecent Violations (${recentViolations.length})\n`));
 
   if (recentViolations.length === 0) {
-    console.log(chalk.green("No recent violations."));
+    logger.info(chalk.green("No recent violations."));
     return;
   }
 

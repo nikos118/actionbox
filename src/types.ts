@@ -60,7 +60,7 @@ export interface DriftInfo {
 export interface ActionBox {
   /** Schema version */
   version: "1.0";
-  /** Skill identifier */
+  /** Skill identifier (directory name) */
   skillId: string;
   /** Human-readable skill name */
   skillName: string;
@@ -97,7 +97,7 @@ export interface Violation {
   severity: ViolationSeverity;
   /** Type of violation */
   type: ViolationType;
-  /** Skill that triggered the violation */
+  /** Attributed skill (when determinable, otherwise "unknown") */
   skillId: string;
   /** The tool call that caused the violation */
   toolName: string;
@@ -118,8 +118,6 @@ export interface ActionBoxConfig {
   mode: EnforcementMode;
   /** Directory containing skills */
   skillsDir: string;
-  /** Alert channel (e.g., Slack channel) */
-  alertChannel?: string;
   /** Whether to auto-generate boxes for new skills */
   autoGenerate: boolean;
   /** Model to use for generation */

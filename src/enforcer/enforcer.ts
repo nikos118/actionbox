@@ -1,11 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { parseActionBox } from "../utils/yaml.js";
-import { actionBoxPath } from "../utils/config.js";
+import { actionBoxPath, skillMdPath } from "../utils/config.js";
 import { sha256 } from "../utils/hash.js";
-import { skillMdPath } from "../utils/config.js";
+import { buildGlobalPolicy } from "./policy.js";
+import type { GlobalPolicy } from "./policy.js";
 import { matchToolCall } from "./matcher.js";
 import type { ActionBox, Violation, EnforcementMode } from "../types.js";
-import type { ToolCallEvent, AgentEndEvent } from "../openclaw-sdk.js";
+import type { PluginLogger } from "../openclaw-sdk.js";
 
 export interface DriftStatus {
   skillId: string;
@@ -15,25 +16,33 @@ export interface DriftStatus {
 }
 
 /**
- * ActionBoxEnforcer loads and caches behavioral contracts,
- * then checks tool calls against them for violations.
+ * ActionBoxEnforcer loads behavioral contracts, builds a global policy
+ * from all loaded contracts, and checks tool calls against it.
+ *
+ * Handles multi-skill environments where all skills are active simultaneously
+ * by using tool-name attribution to map calls to claiming contracts.
  */
 export class ActionBoxEnforcer {
   private boxes = new Map<string, ActionBox>();
+  private policy: GlobalPolicy;
   private mode: EnforcementMode;
+  private logger?: PluginLogger;
 
-  constructor(mode: EnforcementMode = "monitor") {
+  constructor(mode: EnforcementMode = "monitor", logger?: PluginLogger) {
     this.mode = mode;
+    this.logger = logger;
+    this.policy = buildGlobalPolicy([]);
   }
 
   /**
-   * Load an ActionBox from a skill directory into the enforcer cache.
+   * Load an ActionBox from a skill directory into the enforcer.
    */
   async loadBox(skillDir: string): Promise<ActionBox> {
     const boxFile = actionBoxPath(skillDir);
     const content = await readFile(boxFile, "utf-8");
     const box = parseActionBox(content);
     this.boxes.set(box.skillId, box);
+    this.rebuildPolicy();
     return box;
   }
 
@@ -44,11 +53,27 @@ export class ActionBoxEnforcer {
     await Promise.all(
       skillDirs.map(async (dir) => {
         try {
-          await this.loadBox(dir);
+          const boxFile = actionBoxPath(dir);
+          const content = await readFile(boxFile, "utf-8");
+          const box = parseActionBox(content);
+          this.boxes.set(box.skillId, box);
         } catch {
           // Skip directories without valid ACTIONBOX.md
         }
       }),
+    );
+    this.rebuildPolicy();
+  }
+
+  /**
+   * Rebuild the global policy from all loaded boxes.
+   */
+  private rebuildPolicy(): void {
+    this.policy = buildGlobalPolicy(Array.from(this.boxes.values()));
+    this.logger?.debug(
+      `ActionBox policy rebuilt: ${this.boxes.size} contracts, ` +
+      `${this.policy.toolIndex.size} indexed tools, ` +
+      `${this.policy.globalDeniedTools.size} globally denied tools`,
     );
   }
 
@@ -67,58 +92,27 @@ export class ActionBoxEnforcer {
   }
 
   /**
-   * Check a single tool call against its skill's ActionBox.
-   * Returns violations (empty array if none).
+   * Get the current global policy.
    */
-  check(event: ToolCallEvent): Violation[] {
-    const box = this.boxes.get(event.skillId);
-    if (!box) {
-      // No box loaded for this skill — can't enforce
-      return [];
-    }
-    return matchToolCall(event, box);
+  getPolicy(): GlobalPolicy {
+    return this.policy;
   }
 
   /**
-   * Check all tool calls from an agent_end event.
-   * Also checks maxToolCalls if configured.
+   * Check a tool call against the global policy.
+   * This is the main enforcement entry point, used by both
+   * before_tool_call (blocking) and after_tool_call (monitoring) hooks.
    */
-  checkAgentEnd(event: AgentEndEvent): Violation[] {
-    const violations: Violation[] = [];
-    const box = this.boxes.get(event.skillId);
-
-    // Check each tool call
-    for (const toolCall of event.toolCalls) {
-      violations.push(...this.check(toolCall));
-    }
-
-    // Check tool call count limit
-    if (box?.behavior.maxToolCalls) {
-      if (event.toolCalls.length > box.behavior.maxToolCalls) {
-        violations.push({
-          id: crypto.randomUUID(),
-          type: "tool_call_limit_exceeded",
-          severity: "medium",
-          skillId: event.skillId,
-          toolName: "*",
-          message: `Skill made ${event.toolCalls.length} tool calls, exceeding limit of ${box.behavior.maxToolCalls}`,
-          rule: `behavior.maxToolCalls: ${box.behavior.maxToolCalls}`,
-          timestamp: new Date().toISOString(),
-        });
-      }
-    }
-
-    return violations;
+  check(toolName: string, params: Record<string, unknown>): Violation[] {
+    return matchToolCall(toolName, params, this.policy);
   }
 
   /**
    * Check if a skill's SKILL.md has drifted from when its box was generated.
    */
   async checkDrift(skillDir: string): Promise<DriftStatus | null> {
-    const box = this.boxes.values();
     let targetBox: ActionBox | undefined;
 
-    // Find the box for this skill dir by reading ACTIONBOX.md
     try {
       const content = await readFile(actionBoxPath(skillDir), "utf-8");
       targetBox = parseActionBox(content);

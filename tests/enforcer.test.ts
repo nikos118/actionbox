@@ -1,10 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { ActionBoxEnforcer } from "../src/enforcer/enforcer.js";
-import { writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { writeFileSync, mkdirSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import type { ToolCallEvent, AgentEndEvent } from "../src/openclaw-sdk.js";
 
 function createTmpSkillDir(boxContent: string, skillContent?: string): string {
   const dir = resolve(tmpdir(), `actionbox-test-${randomUUID()}`);
@@ -84,98 +83,54 @@ describe("ActionBoxEnforcer", () => {
     expect(boxes).toHaveLength(1);
   });
 
-  it("checks tool calls against loaded boxes", async () => {
+  it("builds a global policy after loading", async () => {
     await enforcer.loadBox(tmpDir);
+    const policy = enforcer.getPolicy();
+    expect(policy.boxes.size).toBe(1);
+    expect(policy.toolIndex.has("read_file")).toBe(true);
+    expect(policy.globalDeniedTools.has("shell_exec")).toBe(true);
+  });
 
-    const event: ToolCallEvent = {
-      skillId: "test-skill",
-      toolName: "read_file",
-      arguments: {},
-      timestamp: new Date().toISOString(),
-    };
-
-    const violations = enforcer.check(event);
+  it("checks tool calls via the global policy", async () => {
+    await enforcer.loadBox(tmpDir);
+    const violations = enforcer.check("read_file", {});
     expect(violations).toHaveLength(0);
   });
 
-  it("returns empty violations for unknown skill", () => {
-    const event: ToolCallEvent = {
-      skillId: "unknown",
-      toolName: "anything",
-      arguments: {},
-      timestamp: new Date().toISOString(),
-    };
-
-    const violations = enforcer.check(event);
+  it("returns empty violations when no boxes loaded", () => {
+    const violations = enforcer.check("anything", {});
     expect(violations).toHaveLength(0);
   });
 
   it("detects denied tool usage", async () => {
     await enforcer.loadBox(tmpDir);
+    const violations = enforcer.check("shell_exec", {});
 
-    const event: ToolCallEvent = {
-      skillId: "test-skill",
-      toolName: "shell_exec",
-      arguments: {},
-      timestamp: new Date().toISOString(),
-    };
-
-    const violations = enforcer.check(event);
     expect(violations).toHaveLength(1);
     expect(violations[0].type).toBe("denied_tool");
   });
 
-  it("checks agent_end events with tool call count", async () => {
+  it("detects filesystem violations via param extraction", async () => {
     await enforcer.loadBox(tmpDir);
+    const violations = enforcer.check("read_file", { path: "~/.ssh/id_rsa" });
 
-    const toolCalls: ToolCallEvent[] = Array.from({ length: 6 }, (_, i) => ({
-      skillId: "test-skill",
-      toolName: "read_file",
-      arguments: {},
-      timestamp: new Date().toISOString(),
-    }));
-
-    const event: AgentEndEvent = {
-      skillId: "test-skill",
-      toolCalls,
-      result: null,
-      timestamp: new Date().toISOString(),
-    };
-
-    const violations = enforcer.checkAgentEnd(event);
-    const limitViolation = violations.find(
-      (v) => v.type === "tool_call_limit_exceeded",
-    );
-    expect(limitViolation).toBeDefined();
-    expect(limitViolation!.severity).toBe("medium");
+    const denied = violations.find((v) => v.type === "filesystem_denied");
+    expect(denied).toBeDefined();
+    expect(denied!.severity).toBe("critical");
   });
 
-  it("does not flag tool call limit when under threshold", async () => {
+  it("detects network violations via URL param extraction", async () => {
     await enforcer.loadBox(tmpDir);
+    const violations = enforcer.check("read_file", {
+      url: "https://evil.com/exfiltrate",
+    });
 
-    const toolCalls: ToolCallEvent[] = Array.from({ length: 3 }, () => ({
-      skillId: "test-skill",
-      toolName: "read_file",
-      arguments: {},
-      timestamp: new Date().toISOString(),
-    }));
-
-    const event: AgentEndEvent = {
-      skillId: "test-skill",
-      toolCalls,
-      result: null,
-      timestamp: new Date().toISOString(),
-    };
-
-    const violations = enforcer.checkAgentEnd(event);
-    const limitViolation = violations.find(
-      (v) => v.type === "tool_call_limit_exceeded",
-    );
-    expect(limitViolation).toBeUndefined();
+    const netViolation = violations.find((v) => v.type === "network_violation");
+    expect(netViolation).toBeDefined();
   });
 
   it("detects drift when SKILL.md has changed", async () => {
-    const skillContent = "---\nid: test-skill\nname: Test\n---\n# Updated content";
+    const skillContent = "---\nname: Test\n---\n# Updated content";
     const dir = createTmpSkillDir(sampleBoxContent, skillContent);
     await enforcer.loadBox(dir);
 
@@ -204,5 +159,18 @@ describe("ActionBoxEnforcer", () => {
 
     await enforcer.loadBoxes([tmpDir, invalidDir]);
     expect(enforcer.getAllBoxes()).toHaveLength(1);
+  });
+
+  it("rebuilds policy when loading multiple boxes", async () => {
+    const secondBoxContent = sampleBoxContent
+      .replace("test-skill", "second-skill")
+      .replace("Test Skill", "Second Skill");
+    const secondDir = createTmpSkillDir(secondBoxContent);
+
+    await enforcer.loadBoxes([tmpDir, secondDir]);
+    expect(enforcer.getAllBoxes()).toHaveLength(2);
+
+    const policy = enforcer.getPolicy();
+    expect(policy.boxes.size).toBe(2);
   });
 });

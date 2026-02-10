@@ -3,11 +3,13 @@ import { generateActionBox } from "../generator/generate.js";
 import { discoverSkillDirs, skillMdPath } from "../utils/config.js";
 import { basename } from "node:path";
 import { stat } from "node:fs/promises";
+import type { PluginLogger } from "../openclaw-sdk.js";
 
 export interface GenerateCommandOptions {
   model: string;
   skillsDir: string;
   skipReview?: boolean;
+  logger: PluginLogger;
 }
 
 /**
@@ -17,24 +19,22 @@ export async function runGenerate(
   skillName: string,
   options: GenerateCommandOptions,
 ): Promise<void> {
-  const { model, skillsDir, skipReview } = options;
+  const { model, skillsDir, skipReview, logger } = options;
   const skillDir = `${skillsDir}/${skillName}`;
 
   // Verify SKILL.md exists
   try {
     await stat(skillMdPath(skillDir));
   } catch {
-    console.error(
-      chalk.red(`Error: No SKILL.md found at ${skillMdPath(skillDir)}`),
-    );
+    logger.error(`No SKILL.md found at ${skillMdPath(skillDir)}`);
     return;
   }
 
-  console.log(
+  logger.info(
     chalk.blue(`Generating ActionBox for skill "${skillName}"...`),
   );
-  console.log(chalk.gray(`  Model: ${model}`));
-  console.log(chalk.gray(`  Review pass: ${skipReview ? "skipped" : "enabled"}`));
+  logger.info(chalk.gray(`  Model: ${model}`));
+  logger.info(chalk.gray(`  Review pass: ${skipReview ? "skipped" : "enabled"}`));
 
   try {
     const result = await generateActionBox({
@@ -43,18 +43,14 @@ export async function runGenerate(
       skipReview,
     });
 
-    console.log(chalk.green(`\nActionBox generated successfully!`));
-    console.log(chalk.gray(`  Output: ${result.path}`));
-    console.log(chalk.gray(`  Passes: ${result.passes}`));
-    console.log(
-      chalk.gray(`  Allowed tools: ${result.box.allowedTools.length}`),
-    );
-    console.log(
-      chalk.gray(`  Denied tools: ${result.box.deniedTools.length}`),
-    );
+    logger.info(chalk.green(`ActionBox generated successfully!`));
+    logger.info(chalk.gray(`  Output: ${result.path}`));
+    logger.info(chalk.gray(`  Passes: ${result.passes}`));
+    logger.info(chalk.gray(`  Allowed tools: ${result.box.allowedTools.length}`));
+    logger.info(chalk.gray(`  Denied tools: ${result.box.deniedTools.length}`));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(chalk.red(`\nGeneration failed: ${message}`));
+    logger.error(`Generation failed: ${message}`);
   }
 }
 
@@ -64,17 +60,17 @@ export async function runGenerate(
 export async function runGenerateAll(
   options: GenerateCommandOptions,
 ): Promise<void> {
-  const { skillsDir } = options;
+  const { skillsDir, logger } = options;
 
-  console.log(chalk.blue(`Discovering skills in ${skillsDir}...`));
+  logger.info(chalk.blue(`Discovering skills in ${skillsDir}...`));
   const skillDirs = await discoverSkillDirs(skillsDir);
 
   if (skillDirs.length === 0) {
-    console.log(chalk.yellow("No skills found with SKILL.md files."));
+    logger.warn("No skills found with SKILL.md files.");
     return;
   }
 
-  console.log(chalk.blue(`Found ${skillDirs.length} skill(s). Generating...\n`));
+  logger.info(chalk.blue(`Found ${skillDirs.length} skill(s). Generating...\n`));
 
   let success = 0;
   let failed = 0;
@@ -87,10 +83,7 @@ export async function runGenerateAll(
     } catch {
       failed++;
     }
-    console.log(""); // blank line between skills
   }
 
-  console.log(
-    chalk.blue(`\nDone. ${success} succeeded, ${failed} failed.`),
-  );
+  logger.info(chalk.blue(`Done. ${success} succeeded, ${failed} failed.`));
 }

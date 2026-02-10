@@ -1,77 +1,60 @@
 import type { Violation } from "../types.js";
-import type { MessageApi } from "../openclaw-sdk.js";
-import {
-  formatMarkdown,
-  formatSlackBlocks,
-  formatViolationSummary,
-} from "./formatters.js";
-
-export interface AlerterOptions {
-  messaging: MessageApi;
-  channel?: string;
-}
+import type { PluginLogger } from "../openclaw-sdk.js";
+import { formatPlainText, formatViolationSummary } from "./formatters.js";
 
 /**
- * ActionBoxAlerter dispatches violation alerts via the OpenClaw messaging API.
+ * ActionBoxAlerter dispatches violation alerts via the plugin logger.
+ * In a future version, this could use OpenClaw's channel/gateway APIs
+ * for richer alert delivery (Slack, email, etc.).
  */
 export class ActionBoxAlerter {
-  private messaging: MessageApi;
-  private channel: string;
+  private logger: PluginLogger;
 
-  constructor(options: AlerterOptions) {
-    this.messaging = options.messaging;
-    this.channel = options.channel ?? "actionbox-alerts";
+  constructor(logger: PluginLogger) {
+    this.logger = logger;
   }
 
   /**
-   * Send an alert for a single violation.
+   * Log a single violation.
    */
-  async alertViolation(violation: Violation): Promise<void> {
-    const markdown = formatMarkdown(violation);
-    await this.messaging.send(this.channel, markdown);
-  }
-
-  /**
-   * Send alerts for multiple violations with a summary.
-   */
-  async alertViolations(violations: Violation[]): Promise<void> {
-    if (violations.length === 0) return;
-
-    // Send summary first
-    const summary = formatViolationSummary(violations);
-    await this.messaging.send(this.channel, summary);
-
-    // Send individual violations as Slack blocks if available
-    for (const violation of violations) {
-      const blocks = formatSlackBlocks(violation);
-      try {
-        await this.messaging.sendBlocks(this.channel, blocks);
-      } catch {
-        // Fall back to markdown if blocks aren't supported
-        await this.alertViolation(violation);
-      }
+  alertViolation(violation: Violation): void {
+    const formatted = formatPlainText(violation);
+    if (violation.severity === "critical") {
+      this.logger.error(`[ActionBox] ${formatted}`);
+    } else if (violation.severity === "high") {
+      this.logger.warn(`[ActionBox] ${formatted}`);
+    } else {
+      this.logger.info(`[ActionBox] ${formatted}`);
     }
   }
 
   /**
-   * Send a drift detection alert.
+   * Log multiple violations with a summary.
    */
-  async alertDrift(
+  alertViolations(violations: Violation[]): void {
+    if (violations.length === 0) return;
+
+    const summary = formatViolationSummary(violations);
+    this.logger.warn(`[ActionBox] ${summary}`);
+
+    for (const violation of violations) {
+      this.alertViolation(violation);
+    }
+  }
+
+  /**
+   * Log a drift detection alert.
+   */
+  alertDrift(
     skillId: string,
     currentHash: string,
     expectedHash: string,
-  ): Promise<void> {
-    const message = [
-      `### ActionBox Drift Detected`,
-      "",
-      `**Skill:** \`${skillId}\``,
-      `**Expected SKILL.md hash:** \`${expectedHash.slice(0, 12)}...\``,
-      `**Current SKILL.md hash:** \`${currentHash.slice(0, 12)}...\``,
-      "",
-      `The skill definition has changed since the ActionBox was generated.`,
-      `Run \`actionbox generate ${skillId}\` to regenerate the behavioral contract.`,
-    ].join("\n");
-
-    await this.messaging.send(this.channel, message);
+  ): void {
+    this.logger.warn(
+      `[ActionBox] Drift detected for skill "${skillId}". ` +
+      `Expected hash: ${expectedHash.slice(0, 12)}..., ` +
+      `current: ${currentHash.slice(0, 12)}... ` +
+      `Run "actionbox generate ${skillId}" to regenerate.`,
+    );
   }
 }

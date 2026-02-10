@@ -1,7 +1,6 @@
 import { resolve, join } from "node:path";
 import { readdir, stat } from "node:fs/promises";
 import type { ActionBoxConfig } from "../types.js";
-import type { PluginConfig } from "../openclaw-sdk.js";
 
 const DEFAULTS: ActionBoxConfig = {
   mode: "monitor",
@@ -12,26 +11,24 @@ const DEFAULTS: ActionBoxConfig = {
 };
 
 /**
- * Build an ActionBoxConfig from plugin configuration, applying defaults.
+ * Build an ActionBoxConfig from raw plugin config (plain object), applying defaults.
  */
 export function buildConfig(
-  pluginConfig: PluginConfig,
-  workspaceRoot: string,
+  pluginConfig: Record<string, unknown> | undefined,
+  workspaceDir: string,
 ): ActionBoxConfig {
+  const raw = pluginConfig ?? {};
   return {
-    mode: pluginConfig.get<ActionBoxConfig["mode"]>("mode") ?? DEFAULTS.mode,
+    mode: (raw.mode as ActionBoxConfig["mode"]) ?? DEFAULTS.mode,
     skillsDir: resolve(
-      workspaceRoot,
-      pluginConfig.get<string>("skillsDir") ?? DEFAULTS.skillsDir,
+      workspaceDir,
+      (raw.skillsDir as string) ?? DEFAULTS.skillsDir,
     ),
-    alertChannel: pluginConfig.get<string>("alertChannel"),
-    autoGenerate:
-      pluginConfig.get<boolean>("autoGenerate") ?? DEFAULTS.autoGenerate,
+    autoGenerate: (raw.autoGenerate as boolean) ?? DEFAULTS.autoGenerate,
     generatorModel:
-      pluginConfig.get<string>("generatorModel") ?? DEFAULTS.generatorModel,
+      (raw.generatorModel as string) ?? DEFAULTS.generatorModel,
     driftCheckInterval:
-      pluginConfig.get<number>("driftCheckInterval") ??
-      DEFAULTS.driftCheckInterval,
+      (raw.driftCheckInterval as number) ?? DEFAULTS.driftCheckInterval,
   };
 }
 
