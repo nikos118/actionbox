@@ -1,13 +1,17 @@
 import type {
   OpenClawPluginDefinition,
   OpenClawPluginApi,
+  BeforeAgentStartEvent,
+  BeforeAgentStartResult,
   BeforeToolCallEvent,
   BeforeToolCallResult,
   AfterToolCallEvent,
+  AgentContext,
   ToolContext,
 } from "./openclaw-sdk.js";
 import { ActionBoxEnforcer } from "./enforcer/enforcer.js";
 import { ActionBoxAlerter } from "./alerter/alerter.js";
+import { buildDirective } from "./injector/directive-builder.js";
 import { buildConfig, discoverSkillDirs } from "./utils/config.js";
 import { runGenerate, runGenerateAll } from "./cli/generate.js";
 import { runAudit } from "./cli/audit.js";
@@ -39,6 +43,7 @@ export {
   serializeActionBox,
 } from "./utils/yaml.js";
 export { sha256 } from "./utils/hash.js";
+export { buildDirective, buildSkillDirective } from "./injector/directive-builder.js";
 
 /**
  * Config schema with parse/safeParse for OpenClaw's plugin loader.
@@ -171,6 +176,18 @@ const actionboxPlugin: OpenClawPluginDefinition = {
       },
       { commands: ["actionbox"] },
     );
+
+    // --- before_agent_start: Inject behavioral directives into context ---
+
+    api.on("before_agent_start", (
+      _event: BeforeAgentStartEvent,
+      _ctx: AgentContext,
+    ): BeforeAgentStartResult | void => {
+      const directive = buildDirective(enforcer.getAllBoxes());
+      if (directive) {
+        return { prependContext: directive };
+      }
+    });
 
     // --- before_tool_call: Enforce mode blocks violations ---
 

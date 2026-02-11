@@ -47,6 +47,10 @@ network:
 
 behavior:
   summary: <one-paragraph summary of expected behavior>
+  alwaysDo:
+    - <positive behavioral guidance the skill should always follow>
+  principles:
+    - <high-level operating principle for the skill>
   neverDo:
     - <action the skill should never take>
   maxToolCalls: <reasonable upper bound>
@@ -61,6 +65,8 @@ behavior:
 6. Set maxToolCalls to a reasonable upper bound (typically 2-5x the expected number)
 7. The behavior.summary should accurately reflect the skill's purpose
 8. neverDo should list actions that would represent scope escape
+9. alwaysDo should list positive behavioral guidance (e.g., "confirm before deleting", "validate input data")
+10. principles should capture high-level operating principles (e.g., "prefer read-only operations")
 
 Output ONLY the YAML content between \`\`\`yaml and \`\`\` fences. No other text.`;
 }

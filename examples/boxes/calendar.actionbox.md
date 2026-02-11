@@ -54,6 +54,13 @@ behavior:
     management system. Creates new tasks for new events, updates existing tasks
     when events change, and sends Slack notifications for upcoming meetings.
     Operates in a read-only manner with respect to the calendar.
+  alwaysDo:
+    - Verify calendar event data before creating tasks
+    - Back up tasks.json before writing changes
+    - Include event source ID when creating tasks for traceability
+  principles:
+    - Prefer read-only operations when possible
+    - Fail gracefully if calendar API is unavailable
   neverDo:
     - Delete or modify Google Calendar events
     - Access files outside ./config and ./data directories

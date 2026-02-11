@@ -38,6 +38,10 @@ export interface BehaviorExpectations {
   summary: string;
   /** Actions the skill should never take */
   neverDo: string[];
+  /** Positive behavioral guidance — actions the skill should always follow */
+  alwaysDo?: string[];
+  /** High-level operating principles for the skill */
+  principles?: string[];
   /** Maximum expected tool calls per invocation */
   maxToolCalls?: number;
 }

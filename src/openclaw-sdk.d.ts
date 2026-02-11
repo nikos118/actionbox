@@ -28,6 +28,16 @@ export interface AfterToolCallEvent {
   durationMs: number;
 }
 
+export interface BeforeAgentStartEvent {
+  prompt: string;
+  messages: unknown[];
+}
+
+export interface BeforeAgentStartResult {
+  systemPrompt?: string;
+  prependContext?: string;
+}
+
 export interface AgentEndEvent {
   messages: unknown[];
   success: boolean;
@@ -67,6 +77,10 @@ export type PluginHookName =
   | "gateway_stop";
 
 export interface PluginHookHandlerMap {
+  before_agent_start: (
+    event: BeforeAgentStartEvent,
+    ctx: AgentContext,
+  ) => Promise<BeforeAgentStartResult | void> | BeforeAgentStartResult | void;
   before_tool_call: (
     event: BeforeToolCallEvent,
     ctx: ToolContext,

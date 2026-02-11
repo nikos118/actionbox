@@ -50,6 +50,13 @@ behavior:
     reading team responses, and generating a summary. Tracks participation and
     sends reminders to team members who haven't posted. Read-only access to
     task system for context.
+  alwaysDo:
+    - Check standup configuration before posting prompts
+    - Wait for configured standup window before sending reminders
+    - Include participation stats in summary posts
+  principles:
+    - Be helpful, not intrusive — limit reminder frequency
+    - Only post to the configured standup channel
   neverDo:
     - Delete Slack messages
     - Create or archive Slack channels

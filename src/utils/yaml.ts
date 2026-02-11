@@ -15,6 +15,13 @@ export function parseActionBox(content: string): ActionBox {
     throw new Error("No YAML frontmatter found in ACTIONBOX.md");
   }
   const parsed = YAML.parse(yamlMatch[1]) as ActionBox;
+
+  // Default new optional fields for backward compatibility
+  if (parsed.behavior) {
+    parsed.behavior.alwaysDo ??= [];
+    parsed.behavior.principles ??= [];
+  }
+
   return parsed;
 }
 

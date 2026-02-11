@@ -237,6 +237,71 @@ ActionBox hashes each `SKILL.md` when generating a contract. A background servic
 
 ---
 
+## Context Injection
+
+ActionBox doesn't just enforce contracts reactively — it also **injects behavioral directives** into each agent's context before execution begins. This gives the LLM driving each skill awareness of its contract *before* it ever makes a tool call.
+
+### How It Works
+
+ActionBox hooks into OpenClaw's `before_agent_start` event. When an agent session starts, ActionBox builds a structured XML directive block from all loaded contracts and injects it via `prependContext`, which places the directive before the system prompt.
+
+```xml
+<actionbox-directive>
+  <skill name="calendar-sync">
+    <purpose>Reads events from Google Calendar and syncs to local tasks...</purpose>
+    <principles>
+      <principle>Prefer read-only operations when possible</principle>
+    </principles>
+    <always-do>
+      <rule>Verify calendar event data before creating tasks</rule>
+    </always-do>
+    <never-do>
+      <rule>Delete or modify Google Calendar events</rule>
+      <rule>Execute shell commands</rule>
+    </never-do>
+    <allowed-tools>google_calendar_read, task_create, task_update, slack_send_message</allowed-tools>
+    <denied-tools>shell_exec, file_delete, google_calendar_write, google_calendar_delete, http_request</denied-tools>
+    <filesystem>
+      <readable>./config/calendar.yaml, ./data/tasks.json</readable>
+      <writable>./data/tasks.json, ./data/tasks.json.bak</writable>
+      <denied>~/.ssh/**, ~/.aws/**, **/.env, **/.env.*, **/credentials*, **/secret*</denied>
+    </filesystem>
+    <network>
+      <allowed>calendar.google.com, *.googleapis.com, slack.com, *.slack.com</allowed>
+      <denied>*.onion, *.tor</denied>
+    </network>
+  </skill>
+</actionbox-directive>
+```
+
+All loaded contracts are included in a single directive block, giving the LLM full awareness of every active behavioral contract.
+
+### Behavioral Guidance Fields
+
+Contracts support both negative constraints and positive guidance:
+
+| Field | Purpose | Example |
+|-------|---------|---------|
+| `behavior.alwaysDo` | Positive behavioral guidance | "Verify calendar event data before creating tasks" |
+| `behavior.principles` | High-level operating principles | "Prefer read-only operations when possible" |
+| `behavior.neverDo` | Actions the skill must never take | "Delete or modify Google Calendar events" |
+
+These fields are optional and backward-compatible — existing contracts without `alwaysDo` or `principles` will continue to work.
+
+### Programmatic Usage
+
+```typescript
+import { buildDirective, buildSkillDirective } from "@openclaw/plugin-actionbox";
+
+// Build directive for all loaded boxes
+const directive = buildDirective(enforcer.getAllBoxes());
+
+// Build directive for a single box
+const skillXml = buildSkillDirective(box);
+```
+
+---
+
 ## CLI Reference
 
 ### `actionbox generate <skill>`
@@ -331,6 +396,8 @@ actionbox/
 │   │   ├── parser.ts            # SKILL.md frontmatter parsing
 │   │   ├── prompts.ts           # Two-pass LLM prompt templates
 │   │   └── generate.ts          # Generation orchestration
+│   ├── injector/
+│   │   └── directive-builder.ts # XML directive builder for context injection
 │   ├── enforcer/
 │   │   ├── param-extractor.ts   # Extract paths/hosts from tool params
 │   │   ├── policy.ts            # Global policy engine (multi-skill merge)
@@ -354,7 +421,8 @@ actionbox/
 │   ├── generator.test.ts        # Parsing and prompt construction tests
 │   ├── enforcer.test.ts         # Enforcer class tests
 │   ├── matcher.test.ts          # Violation matching tests
-│   └── path-matcher.test.ts     # Path and host matching tests
+│   ├── path-matcher.test.ts     # Path and host matching tests
+│   └── injector.test.ts         # Directive builder tests
 ├── examples/
 │   └── boxes/                   # Example ACTIONBOX.md contracts
 │       ├── calendar.actionbox.md
@@ -398,12 +466,13 @@ npm run typecheck
 
 ### Test Coverage
 
-61 tests across 4 test files covering:
+Tests across 5 test files covering:
 
 - **Generator** — SKILL.md parsing, prompt construction, YAML extraction
 - **Enforcer** — Box loading, caching, agent_end checking, drift detection
 - **Matcher** — Multi-skill policy matching, tool attribution, filesystem/network violations
 - **Path Matcher** — Glob patterns, host wildcards, edge cases
+- **Injector** — XML directive building, context injection, backward compatibility
 
 ---
 

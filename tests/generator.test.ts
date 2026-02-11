@@ -74,6 +74,8 @@ describe("buildGeneratorPrompt", () => {
     expect(prompt).toContain("CONSERVATIVE");
     expect(prompt).toContain("deniedTools");
     expect(prompt).toContain("allowedTools");
+    expect(prompt).toContain("alwaysDo");
+    expect(prompt).toContain("principles");
   });
 });
 
