@@ -22,14 +22,16 @@ version: "1.0"
 skillId: "${skill.skillId}"
 skillName: "${skill.skillName}"
 
-allowedTools:
-  - name: <tool_name>
-    reason: <why this tool is needed>
-    constraints: {} # optional argument constraints
+allowedCapabilities:
+  - <capability description, e.g. "Google Calendar read-only access">
+  - <capability description, e.g. "Local task management (create and update)">
 
-deniedTools:
-  - name: <tool_name>
-    reason: <why this must be denied>
+deniedCapabilities:
+  - <capability description, e.g. "Shell or command execution">
+  - <capability description, e.g. "Calendar event modification or deletion">
+
+allowedTools: []
+deniedTools: []
 
 filesystem:
   readable:
@@ -57,16 +59,17 @@ behavior:
 \`\`\`
 
 ## Rules
-1. Only allow tools that the skill EXPLICITLY needs based on its description
-2. Filesystem access should be scoped as narrowly as possible
-3. Network access should be limited to explicitly mentioned services
-4. The deniedTools list should include dangerous tools the skill has no reason to use (e.g., shell execution, file deletion outside scope)
-5. Always deny access to sensitive paths like ~/.ssh, ~/.aws, .env files
-6. Set maxToolCalls to a reasonable upper bound (typically 2-5x the expected number)
-7. The behavior.summary should accurately reflect the skill's purpose
-8. neverDo should list actions that would represent scope escape
-9. alwaysDo should list positive behavioral guidance (e.g., "confirm before deleting", "validate input data")
-10. principles should capture high-level operating principles (e.g., "prefer read-only operations")
+1. Use allowedCapabilities to describe CONCEPTUAL capabilities the skill needs (e.g. "Slack messaging", "Google Calendar read-only access") — do NOT guess specific tool names
+2. Use deniedCapabilities to describe categories of access the skill must NOT have (e.g. "Shell or command execution", "Direct HTTP requests to arbitrary hosts")
+3. Leave allowedTools and deniedTools as empty arrays — capability descriptions replace exact tool names
+4. Filesystem access should be scoped as narrowly as possible
+5. Network access should be limited to explicitly mentioned services
+6. Always deny access to sensitive paths like ~/.ssh, ~/.aws, .env files
+7. Set maxToolCalls to a reasonable upper bound (typically 2-5x the expected number)
+8. The behavior.summary should accurately reflect the skill's purpose
+9. neverDo should list actions that would represent scope escape
+10. alwaysDo should list positive behavioral guidance (e.g., "confirm before deleting", "validate input data")
+11. principles should capture high-level operating principles (e.g., "prefer read-only operations")
 
 Output ONLY the YAML content between \`\`\`yaml and \`\`\` fences. No other text.`;
 }
@@ -81,11 +84,12 @@ export function buildReviewPrompt(
   return `You are a red-team security reviewer for AI agent behavioral contracts.
 
 Given the original SKILL.md and a generated ACTIONBOX contract, review the contract for:
-1. **Over-permissiveness**: Are tools or paths allowed that the skill doesn't need?
-2. **Missing denials**: Are there dangerous capabilities not explicitly denied?
-3. **Scope escape vectors**: Could the skill use allowed tools to access denied resources indirectly?
+1. **Over-permissiveness**: Are capabilities allowed that the skill doesn't need?
+2. **Missing denials**: Are there dangerous capability categories not explicitly denied?
+3. **Scope escape vectors**: Could the skill use allowed capabilities to access denied resources indirectly?
 4. **Filesystem gaps**: Are sensitive paths (credentials, keys, configs) properly denied?
 5. **Network gaps**: Could the skill exfiltrate data through allowed network access?
+6. **Capability precision**: Are the capability descriptions specific enough to prevent abuse?
 
 ## SKILL.md
 \`\`\`
@@ -99,6 +103,8 @@ ${generatedYaml}
 
 ## Instructions
 Output a REVISED version of the YAML contract that addresses any issues found. If the original is adequate, return it unchanged. Be strict but fair — don't remove capabilities the skill genuinely needs.
+
+Ensure allowedCapabilities and deniedCapabilities use conceptual descriptions, NOT exact tool names. Leave allowedTools and deniedTools as empty arrays.
 
 Output ONLY the YAML content between \`\`\`yaml and \`\`\` fences. No other text.`;
 }

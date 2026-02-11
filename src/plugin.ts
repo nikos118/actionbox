@@ -44,6 +44,11 @@ export {
 } from "./utils/yaml.js";
 export { sha256 } from "./utils/hash.js";
 export { buildDirective, buildSkillDirective } from "./injector/directive-builder.js";
+export {
+  classifyToolCall,
+  CapabilityMatcherCache,
+} from "./enforcer/capability-matcher.js";
+export type { CapabilityClassification } from "./enforcer/capability-matcher.js";
 
 /**
  * Config schema with parse/safeParse for OpenClaw's plugin loader.
@@ -191,11 +196,11 @@ const actionboxPlugin: OpenClawPluginDefinition = {
 
     // --- before_tool_call: Enforce mode blocks violations ---
 
-    api.on("before_tool_call", (
+    api.on("before_tool_call", async (
       event: BeforeToolCallEvent,
       _ctx: ToolContext,
-    ): BeforeToolCallResult | void => {
-      const violations = enforcer.check(event.toolName, event.params);
+    ): Promise<BeforeToolCallResult | void> => {
+      const violations = await enforcer.check(event.toolName, event.params);
 
       if (violations.length > 0) {
         recordViolations(violations);
@@ -213,11 +218,11 @@ const actionboxPlugin: OpenClawPluginDefinition = {
 
     // --- after_tool_call: Monitor mode logs all violations ---
 
-    api.on("after_tool_call", (
+    api.on("after_tool_call", async (
       event: AfterToolCallEvent,
       _ctx: ToolContext,
-    ): void => {
-      const violations = enforcer.check(event.toolName, event.params);
+    ): Promise<void> => {
+      const violations = await enforcer.check(event.toolName, event.params);
 
       if (violations.length > 0) {
         recordViolations(violations);

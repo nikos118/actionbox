@@ -5,6 +5,17 @@
 version: "1.0"
 skillId: github-triage
 skillName: GitHub Issue Triage
+allowedCapabilities:
+  - GitHub issue reading and listing
+  - GitHub issue labeling and categorization
+  - GitHub issue commenting for triage notes
+  - GitHub issue assignment to team members
+deniedCapabilities:
+  - Shell or command execution
+  - GitHub issue closure or creation
+  - GitHub comment deletion
+  - Local file writing
+  - Direct HTTP requests to arbitrary hosts
 allowedTools:
   - name: github_list_issues
     reason: Required to fetch open issues for triage

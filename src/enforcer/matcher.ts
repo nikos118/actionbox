@@ -12,6 +12,8 @@ import {
   extractHosts,
   inferFileOperation,
 } from "./param-extractor.js";
+import type { CapabilityClassification, CapabilityMatcherCache } from "./capability-matcher.js";
+import { classifyToolCall } from "./capability-matcher.js";
 
 /**
  * Check a tool call against the global policy.
@@ -20,14 +22,17 @@ import {
  * Multi-skill strategy:
  * 1. Globally denied tools (denied by any, allowed by none) → critical
  * 2. Unlisted tools (not in any contract's allowedTools) → high
+ *    2b. If capabilities exist and no exact match, evaluate via LLM
  * 3. Global denied paths (union of all contracts) → critical
  * 4. Per-skill filesystem/network checks for claiming contracts → high if ALL fail
  */
-export function matchToolCall(
+export async function matchToolCall(
   toolName: string,
   params: Record<string, unknown>,
   policy: GlobalPolicy,
-): Violation[] {
+  capabilityCache?: CapabilityMatcherCache,
+  capabilityModel?: string,
+): Promise<Violation[]> {
   const violations: Violation[] = [];
 
   // 1. Check globally denied tools
@@ -48,17 +53,62 @@ export function matchToolCall(
 
   // 2. Check if tool is known by any contract
   const claimingSkills = attributeToolToSkills(toolName, policy);
+  const hasCapabilities =
+    policy.allAllowedCapabilities.length > 0 ||
+    policy.allDeniedCapabilities.length > 0;
+
   if (claimingSkills.length === 0 && policy.boxes.size > 0) {
-    violations.push(
-      createViolation({
-        type: "unlisted_tool",
-        severity: "high",
-        skillId: "unknown",
+    // 2b. If capabilities exist, try LLM-based classification before flagging as unlisted
+    if (hasCapabilities && capabilityCache) {
+      const classification = await resolveCapability(
         toolName,
-        message: `Tool "${toolName}" is not listed in any loaded ActionBox contract`,
-        rule: "allowedTools (all contracts)",
-      }),
-    );
+        params,
+        policy,
+        capabilityCache,
+        capabilityModel,
+      );
+
+      if (classification.matchedCapability && !classification.allowed) {
+        // Matched a denied capability
+        violations.push(
+          createViolation({
+            type: "denied_capability",
+            severity: "critical",
+            skillId: "unknown",
+            toolName,
+            message: `Tool "${toolName}" matches denied capability: ${classification.matchedCapability}. ${classification.reason}`,
+            rule: `deniedCapabilities: ${classification.matchedCapability}`,
+          }),
+        );
+        return violations;
+      }
+
+      if (!classification.allowed) {
+        // No allowed capability matched
+        violations.push(
+          createViolation({
+            type: "unlisted_capability",
+            severity: "high",
+            skillId: "unknown",
+            toolName,
+            message: `Tool "${toolName}" does not match any allowed capability. ${classification.reason}`,
+            rule: "allowedCapabilities (all contracts)",
+          }),
+        );
+      }
+      // If classification.allowed, tool is permitted by capability — no violation
+    } else {
+      violations.push(
+        createViolation({
+          type: "unlisted_tool",
+          severity: "high",
+          skillId: "unknown",
+          toolName,
+          message: `Tool "${toolName}" is not listed in any loaded ActionBox contract`,
+          rule: "allowedTools (all contracts)",
+        }),
+      );
+    }
   }
 
   // 3. Extract paths and hosts from params
@@ -177,6 +227,28 @@ export function matchToolCall(
   }
 
   return violations;
+}
+
+async function resolveCapability(
+  toolName: string,
+  params: Record<string, unknown>,
+  policy: GlobalPolicy,
+  cache: CapabilityMatcherCache,
+  model?: string,
+): Promise<CapabilityClassification> {
+  const cached = cache.get(toolName);
+  if (cached) return cached;
+
+  const classification = await classifyToolCall(
+    toolName,
+    params,
+    policy.allAllowedCapabilities,
+    policy.allDeniedCapabilities,
+    model,
+  );
+
+  cache.set(toolName, classification);
+  return classification;
 }
 
 function createViolation(params: {

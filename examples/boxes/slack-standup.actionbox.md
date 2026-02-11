@@ -5,6 +5,17 @@
 version: "1.0"
 skillId: slack-standup
 skillName: Slack Standup Bot
+allowedCapabilities:
+  - Slack messaging (send and read in configured channel)
+  - Slack user listing for participation tracking
+  - Task list reading for standup context
+deniedCapabilities:
+  - Shell or command execution
+  - Slack message deletion
+  - Slack channel creation or archival
+  - Slack channel membership management
+  - Local file writing
+  - Direct HTTP requests to arbitrary hosts
 allowedTools:
   - name: slack_send_message
     reason: Required to post standup prompts and summaries

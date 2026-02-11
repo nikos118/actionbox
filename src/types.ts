@@ -72,6 +72,10 @@ export interface ActionBox {
   allowedTools: AllowedTool[];
   /** Tools the skill must never use */
   deniedTools: DeniedTool[];
+  /** Conceptual capability descriptions the skill is allowed (LLM-evaluated) */
+  allowedCapabilities?: string[];
+  /** Conceptual capability descriptions the skill must not use (LLM-evaluated) */
+  deniedCapabilities?: string[];
   /** Filesystem access rules */
   filesystem: FilesystemRules;
   /** Network access rules */
@@ -87,6 +91,8 @@ export type ViolationSeverity = "critical" | "high" | "medium" | "low";
 export type ViolationType =
   | "denied_tool"
   | "unlisted_tool"
+  | "denied_capability"
+  | "unlisted_capability"
   | "filesystem_read_violation"
   | "filesystem_write_violation"
   | "filesystem_denied"

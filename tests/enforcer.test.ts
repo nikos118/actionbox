@@ -93,18 +93,18 @@ describe("ActionBoxEnforcer", () => {
 
   it("checks tool calls via the global policy", async () => {
     await enforcer.loadBox(tmpDir);
-    const violations = enforcer.check("read_file", {});
+    const violations = await enforcer.check("read_file", {});
     expect(violations).toHaveLength(0);
   });
 
-  it("returns empty violations when no boxes loaded", () => {
-    const violations = enforcer.check("anything", {});
+  it("returns empty violations when no boxes loaded", async () => {
+    const violations = await enforcer.check("anything", {});
     expect(violations).toHaveLength(0);
   });
 
   it("detects denied tool usage", async () => {
     await enforcer.loadBox(tmpDir);
-    const violations = enforcer.check("shell_exec", {});
+    const violations = await enforcer.check("shell_exec", {});
 
     expect(violations).toHaveLength(1);
     expect(violations[0].type).toBe("denied_tool");
@@ -112,7 +112,7 @@ describe("ActionBoxEnforcer", () => {
 
   it("detects filesystem violations via param extraction", async () => {
     await enforcer.loadBox(tmpDir);
-    const violations = enforcer.check("read_file", { path: "~/.ssh/id_rsa" });
+    const violations = await enforcer.check("read_file", { path: "~/.ssh/id_rsa" });
 
     const denied = violations.find((v) => v.type === "filesystem_denied");
     expect(denied).toBeDefined();
@@ -121,7 +121,7 @@ describe("ActionBoxEnforcer", () => {
 
   it("detects network violations via URL param extraction", async () => {
     await enforcer.loadBox(tmpDir);
-    const violations = enforcer.check("read_file", {
+    const violations = await enforcer.check("read_file", {
       url: "https://evil.com/exfiltrate",
     });
 
@@ -172,5 +172,47 @@ describe("ActionBoxEnforcer", () => {
 
     const policy = enforcer.getPolicy();
     expect(policy.boxes.size).toBe(2);
+  });
+
+  it("includes capabilities in global policy", async () => {
+    const capBoxContent = `# ACTIONBOX.md — Behavioral Contract
+
+---
+version: "1.0"
+skillId: cap-skill
+skillName: Cap Skill
+allowedTools: []
+deniedTools: []
+allowedCapabilities:
+  - Google Calendar read-only access
+  - Slack messaging
+deniedCapabilities:
+  - Shell or command execution
+filesystem:
+  readable: []
+  writable: []
+  denied: []
+network:
+  allowedHosts: []
+  deniedHosts: []
+behavior:
+  summary: A skill with capabilities
+  neverDo:
+    - Execute shell commands
+  maxToolCalls: 10
+drift:
+  skillHash: "cap123"
+  generatedAt: "2025-01-15T10:00:00.000Z"
+  generatorModel: claude-sonnet-4-5-20250929
+  reviewed: false
+---
+`;
+    const capDir = createTmpSkillDir(capBoxContent);
+    await enforcer.loadBox(capDir);
+
+    const policy = enforcer.getPolicy();
+    expect(policy.allAllowedCapabilities).toContain("Google Calendar read-only access");
+    expect(policy.allAllowedCapabilities).toContain("Slack messaging");
+    expect(policy.allDeniedCapabilities).toContain("Shell or command execution");
   });
 });

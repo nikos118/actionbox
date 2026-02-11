@@ -16,3 +16,8 @@ export type { GlobalPolicy } from "./policy.js";
 export { matchToolCall } from "./matcher.js";
 export { ActionBoxEnforcer } from "./enforcer.js";
 export type { DriftStatus } from "./enforcer.js";
+export {
+  classifyToolCall,
+  CapabilityMatcherCache,
+} from "./capability-matcher.js";
+export type { CapabilityClassification } from "./capability-matcher.js";

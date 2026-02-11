@@ -63,7 +63,7 @@ describe("parseSkillMd", () => {
 });
 
 describe("buildGeneratorPrompt", () => {
-  it("includes the skill content and ID in the prompt", () => {
+  it("includes the skill content, ID, and capability instructions", () => {
     const content = readFixture("calendar-skill.md");
     const skill = parseSkillMd(content);
     const prompt = buildGeneratorPrompt(skill);
@@ -72,15 +72,19 @@ describe("buildGeneratorPrompt", () => {
     expect(prompt).toContain("Calendar Sync");
     expect(prompt).toContain("SKILL.md");
     expect(prompt).toContain("CONSERVATIVE");
-    expect(prompt).toContain("deniedTools");
-    expect(prompt).toContain("allowedTools");
+    expect(prompt).toContain("allowedCapabilities");
+    expect(prompt).toContain("deniedCapabilities");
+    expect(prompt).toContain("allowedTools: []");
+    expect(prompt).toContain("deniedTools: []");
+    expect(prompt).toContain("CONCEPTUAL capabilities");
+    expect(prompt).toContain("do NOT guess specific tool names");
     expect(prompt).toContain("alwaysDo");
     expect(prompt).toContain("principles");
   });
 });
 
 describe("buildReviewPrompt", () => {
-  it("includes both the skill and generated YAML", () => {
+  it("includes both the skill and generated YAML with capability review", () => {
     const content = readFixture("calendar-skill.md");
     const skill = parseSkillMd(content);
     const generatedYaml = "version: 1.0\nskillId: calendar-sync";
@@ -91,6 +95,8 @@ describe("buildReviewPrompt", () => {
     expect(prompt).toContain(generatedYaml);
     expect(prompt).toContain("Over-permissiveness");
     expect(prompt).toContain("Scope escape vectors");
+    expect(prompt).toContain("Capability precision");
+    expect(prompt).toContain("conceptual descriptions");
   });
 });
 
@@ -117,15 +123,15 @@ Done!`;
 
   it("handles multi-line YAML blocks", () => {
     const response = `\`\`\`yaml
-allowedTools:
-  - name: read_file
-    reason: needed
-  - name: write_file
-    reason: also needed
+allowedCapabilities:
+  - Google Calendar read-only access
+  - Slack messaging
+deniedCapabilities:
+  - Shell execution
 \`\`\``;
 
     const yaml = extractYamlFromResponse(response);
-    expect(yaml).toContain("allowedTools:");
-    expect(yaml).toContain("read_file");
+    expect(yaml).toContain("allowedCapabilities:");
+    expect(yaml).toContain("Google Calendar read-only access");
   });
 });

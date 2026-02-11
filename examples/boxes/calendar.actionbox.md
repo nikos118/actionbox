@@ -5,6 +5,15 @@
 version: "1.0"
 skillId: calendar-sync
 skillName: Calendar Sync
+allowedCapabilities:
+  - Google Calendar read-only access
+  - Local task management (create and update)
+  - Slack messaging for meeting notifications
+deniedCapabilities:
+  - Shell or command execution
+  - Calendar event modification or deletion
+  - File deletion
+  - Direct HTTP requests to arbitrary hosts
 allowedTools:
   - name: google_calendar_read
     reason: Required to fetch events from Google Calendar API

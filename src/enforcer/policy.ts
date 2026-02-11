@@ -20,6 +20,10 @@ export interface GlobalPolicy {
   globalDeniedPaths: string[];
   /** Union of all contracts' network denied hosts */
   globalDeniedHosts: string[];
+  /** Union of all contracts' allowed capability descriptions */
+  allAllowedCapabilities: string[];
+  /** Union of all contracts' denied capability descriptions */
+  allDeniedCapabilities: string[];
   /** All loaded boxes keyed by skill ID */
   boxes: Map<string, ActionBox>;
 }
@@ -34,6 +38,8 @@ export function buildGlobalPolicy(boxes: ActionBox[]): GlobalPolicy {
   const allAllowedToolNames = new Set<string>();
   const deniedPaths = new Set<string>();
   const deniedHosts = new Set<string>();
+  const allowedCapabilities = new Set<string>();
+  const deniedCapabilities = new Set<string>();
 
   for (const box of boxes) {
     boxMap.set(box.skillId, box);
@@ -68,6 +74,14 @@ export function buildGlobalPolicy(boxes: ActionBox[]): GlobalPolicy {
     for (const host of box.network.deniedHosts) {
       deniedHosts.add(host);
     }
+
+    // Collect capability descriptions (union)
+    for (const cap of box.allowedCapabilities ?? []) {
+      allowedCapabilities.add(cap);
+    }
+    for (const cap of box.deniedCapabilities ?? []) {
+      deniedCapabilities.add(cap);
+    }
   }
 
   // Global denied = denied by any contract AND not allowed by any contract
@@ -83,6 +97,8 @@ export function buildGlobalPolicy(boxes: ActionBox[]): GlobalPolicy {
     toolIndex,
     globalDeniedPaths: [...deniedPaths],
     globalDeniedHosts: [...deniedHosts],
+    allAllowedCapabilities: [...allowedCapabilities],
+    allDeniedCapabilities: [...deniedCapabilities],
     boxes: boxMap,
   };
 }

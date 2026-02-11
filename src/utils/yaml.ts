@@ -22,6 +22,9 @@ export function parseActionBox(content: string): ActionBox {
     parsed.behavior.principles ??= [];
   }
 
+  parsed.allowedCapabilities ??= [];
+  parsed.deniedCapabilities ??= [];
+
   return parsed;
 }
 

@@ -47,11 +47,36 @@ ActionBox doesn't blindly trust its own output. Generation uses two LLM passes:
 
 The result is a contract that's been both authored and attacked before a human ever sees it.
 
+### Capability-Based Tool Matching
+
+Instead of requiring exact tool names in contracts (which are brittle and hard to guess), ActionBox supports **capability descriptions** — conceptual labels like "Google Calendar read-only access" or "Shell or command execution."
+
+The generator produces `allowedCapabilities` and `deniedCapabilities` as the primary output. At runtime, when a tool call doesn't match any exact tool name, ActionBox uses an LLM (Haiku by default) to classify whether the tool call aligns with the declared capabilities.
+
+```
+Tool call arrives
+  │
+  ├─ 1. Exact tool name checks (fast, deterministic)
+  │     globalDeniedTools, toolIndex lookups
+  │
+  ├─ 2. If no exact match AND capabilities exist:
+  │     Check capability cache → if miss, call LLM
+  │     Denied capability matched → violation (critical)
+  │     No allowed capability matched → violation (high)
+  │
+  └─ 3. Filesystem/network checks (unchanged)
+```
+
+Results are cached by tool name for the enforcer's lifetime, so each tool is classified only once.
+
+Contracts can use both systems simultaneously — `allowedTools`/`deniedTools` for fast deterministic enforcement with known names, and `allowedCapabilities`/`deniedCapabilities` for flexible LLM-evaluated matching.
+
 ### Multi-Skill Enforcement
 
 OpenClaw loads all eligible skills simultaneously — there's no "one skill at a time." ActionBox handles this by building a **global policy** from all loaded contracts:
 
 - **Tool attribution** — each contract lists its `allowedTools`. ActionBox builds an index mapping tool names to the contracts that claim them. When a tool call comes in, it finds the claiming contract(s) and checks their rules.
+- **Capability matching** — if no exact tool name match is found, ActionBox falls back to LLM-based capability classification using `allowedCapabilities` and `deniedCapabilities` from all contracts.
 - **Global denials** — if a tool is in any contract's `deniedTools` and not in any contract's `allowedTools`, it's globally blocked. Filesystem denied patterns (like `~/.ssh/**`) and network denied hosts (like `*.onion`) from ALL contracts are merged and always enforced.
 - **Generous on allows** — if multiple skills claim a tool, the call is permitted as long as ANY claiming contract's rules allow it. This avoids false positives in multi-skill environments.
 
@@ -63,6 +88,8 @@ OpenClaw loads all eligible skills simultaneously — there's no "one skill at a
   Contract B ────────>│  Global Denied Tools     │──── before_tool_call ──── Block / Allow
   Contract C ────────>│  Global Denied Paths     │──── after_tool_call  ──── Log / Alert
                       │  Global Denied Hosts     │
+                      │  Allowed Capabilities    │
+                      │  Denied Capabilities     │
                       └─────────────────────────┘
 ```
 
@@ -153,7 +180,19 @@ version: "1.0"
 skillId: calendar-sync
 skillName: Calendar Sync
 
-# What the skill CAN use
+# Conceptual capability descriptions (LLM-evaluated at runtime)
+allowedCapabilities:
+  - Google Calendar read-only access
+  - Local task management (create and update)
+  - Slack messaging for meeting notifications
+
+deniedCapabilities:
+  - Shell or command execution
+  - Calendar event modification or deletion
+  - File deletion
+  - Direct HTTP requests to arbitrary hosts
+
+# Exact tool names (optional — for fast deterministic enforcement)
 allowedTools:
   - name: google_calendar_read
     reason: Required to fetch events from Google Calendar API
@@ -162,7 +201,6 @@ allowedTools:
   - name: slack_send_message
     reason: Required to send meeting notifications
 
-# What the skill must NEVER use
 deniedTools:
   - name: shell_exec
     reason: Calendar sync has no need for shell execution
@@ -220,8 +258,8 @@ drift:
 
 | Severity | What triggers it | Example |
 |----------|-----------------|---------|
-| **Critical** | Denied tool used, denied filesystem path accessed | Skill calls `shell_exec`, reads `~/.ssh/id_rsa` |
-| **High** | Unlisted tool used, filesystem or network rule violated | Skill calls `unknown_tool`, writes outside allowed dirs |
+| **Critical** | Denied tool used, denied capability matched, denied filesystem path accessed | Skill calls `shell_exec`, tool matches "Shell execution" denied capability, reads `~/.ssh/id_rsa` |
+| **High** | Unlisted tool/capability, filesystem or network rule violated | Skill calls tool matching no allowed capability, writes outside allowed dirs |
 | **Medium** | Tool call limit exceeded | Skill makes 50 calls when limit is 20 |
 | **Low** | Minor behavioral anomalies | Unusual argument patterns |
 
@@ -265,6 +303,15 @@ ActionBox hooks into OpenClaw's `before_agent_start` event. When an agent sessio
       <rule>Delete or modify Google Calendar events</rule>
       <rule>Execute shell commands</rule>
     </never-do>
+    <allowed-capabilities>
+      <capability>Google Calendar read-only access</capability>
+      <capability>Local task management (create and update)</capability>
+      <capability>Slack messaging for meeting notifications</capability>
+    </allowed-capabilities>
+    <denied-capabilities>
+      <capability>Shell or command execution</capability>
+      <capability>Calendar event modification or deletion</capability>
+    </denied-capabilities>
     <allowed-tools>google_calendar_read, task_create, task_update, slack_send_message</allowed-tools>
     <denied-tools>shell_exec, file_delete, google_calendar_write, google_calendar_delete, http_request</denied-tools>
     <filesystem>
@@ -372,20 +419,24 @@ import {
   generateActionBox,
   parseSkillMd,
   sha256,
+  CapabilityMatcherCache,
+  classifyToolCall,
 } from "@openclaw/plugin-actionbox";
 
 // Load contracts and enforce
 const enforcer = new ActionBoxEnforcer("monitor");
 await enforcer.loadBoxes(["./skills/calendar-sync", "./skills/github-triage"]);
 
-// Check a tool call (params are extracted automatically)
-const violations = enforcer.check("shell_exec", { command: "rm -rf /" });
+// Check a tool call (params are extracted automatically, capabilities evaluated via LLM)
+const violations = await enforcer.check("shell_exec", { command: "rm -rf /" });
 // => [{ severity: "critical", type: "denied_tool", ... }]
 
 // Access the global policy directly
 const policy = enforcer.getPolicy();
-console.log(policy.globalDeniedTools); // tools denied across all contracts
-console.log(policy.toolIndex);         // tool name → claiming skill IDs
+console.log(policy.globalDeniedTools);       // tools denied across all contracts
+console.log(policy.toolIndex);               // tool name → claiming skill IDs
+console.log(policy.allAllowedCapabilities);  // union of all allowed capabilities
+console.log(policy.allDeniedCapabilities);   // union of all denied capabilities
 ```
 
 ---
@@ -409,6 +460,7 @@ actionbox/
 │   │   ├── policy.ts            # Global policy engine (multi-skill merge)
 │   │   ├── path-matcher.ts      # Glob matching for paths and hosts
 │   │   ├── matcher.ts           # Tool call → policy violation matching
+│   │   ├── capability-matcher.ts # LLM-based capability classification with caching
 │   │   └── enforcer.ts          # Enforcer class with caching
 │   ├── alerter/
 │   │   ├── formatters.ts        # Plain text / Markdown / Slack formatters
@@ -428,7 +480,8 @@ actionbox/
 │   ├── enforcer.test.ts         # Enforcer class tests
 │   ├── matcher.test.ts          # Violation matching tests
 │   ├── path-matcher.test.ts     # Path and host matching tests
-│   └── injector.test.ts         # Directive builder tests
+│   ├── injector.test.ts         # Directive builder tests
+│   └── capability-matcher.test.ts # Capability classification tests
 ├── examples/
 │   └── boxes/                   # Example ACTIONBOX.md contracts
 │       ├── calendar.actionbox.md
@@ -472,13 +525,14 @@ npm run typecheck
 
 ### Test Coverage
 
-Tests across 5 test files covering:
+Tests across 6 test files covering:
 
 - **Generator** — SKILL.md parsing, prompt construction, YAML extraction
-- **Enforcer** — Box loading, caching, agent_end checking, drift detection
+- **Enforcer** — Box loading, caching, async checking, drift detection, capability policy
 - **Matcher** — Multi-skill policy matching, tool attribution, filesystem/network violations
 - **Path Matcher** — Glob patterns, host wildcards, edge cases
-- **Injector** — XML directive building, context injection, backward compatibility
+- **Injector** — XML directive building, context injection, capability rendering, backward compatibility
+- **Capability Matcher** — Cache behavior, classification prompts, LLM integration with mocked API
 
 ---
 

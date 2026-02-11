@@ -180,6 +180,79 @@ describe("buildSkillDirective", () => {
 
     expect(xml).not.toContain("<network>");
   });
+
+  it("renders allowed-capabilities section", () => {
+    const box = makeBox({
+      allowedCapabilities: [
+        "Google Calendar read-only access",
+        "Slack messaging for notifications",
+      ],
+    });
+    const xml = buildSkillDirective(box);
+
+    expect(xml).toContain("<allowed-capabilities>");
+    expect(xml).toContain("<capability>Google Calendar read-only access</capability>");
+    expect(xml).toContain("<capability>Slack messaging for notifications</capability>");
+    expect(xml).toContain("</allowed-capabilities>");
+  });
+
+  it("renders denied-capabilities section", () => {
+    const box = makeBox({
+      deniedCapabilities: [
+        "Shell or command execution",
+        "Calendar event modification",
+      ],
+    });
+    const xml = buildSkillDirective(box);
+
+    expect(xml).toContain("<denied-capabilities>");
+    expect(xml).toContain("<capability>Shell or command execution</capability>");
+    expect(xml).toContain("<capability>Calendar event modification</capability>");
+    expect(xml).toContain("</denied-capabilities>");
+  });
+
+  it("omits capability sections when empty", () => {
+    const box = makeBox({
+      allowedCapabilities: [],
+      deniedCapabilities: [],
+    });
+    const xml = buildSkillDirective(box);
+
+    expect(xml).not.toContain("<allowed-capabilities>");
+    expect(xml).not.toContain("<denied-capabilities>");
+  });
+
+  it("omits capability sections when undefined", () => {
+    const box = makeBox();
+    // makeBox doesn't set capabilities by default, so they're undefined
+    const xml = buildSkillDirective(box);
+
+    expect(xml).not.toContain("<allowed-capabilities>");
+    expect(xml).not.toContain("<denied-capabilities>");
+  });
+
+  it("escapes XML in capability descriptions", () => {
+    const box = makeBox({
+      allowedCapabilities: ["Read <system> & config files"],
+      deniedCapabilities: ["Access to /etc/passwd > secrets"],
+    });
+    const xml = buildSkillDirective(box);
+
+    expect(xml).toContain("<capability>Read &lt;system&gt; &amp; config files</capability>");
+    expect(xml).toContain("<capability>Access to /etc/passwd &gt; secrets</capability>");
+  });
+
+  it("renders capabilities before tools in the XML output", () => {
+    const box = makeBox({
+      allowedCapabilities: ["Calendar access"],
+      deniedCapabilities: ["Shell execution"],
+    });
+    const xml = buildSkillDirective(box);
+
+    const capsIndex = xml.indexOf("<allowed-capabilities>");
+    const toolsIndex = xml.indexOf("<allowed-tools>");
+    expect(capsIndex).toBeLessThan(toolsIndex);
+  });
 });
 
 describe("buildDirective", () => {

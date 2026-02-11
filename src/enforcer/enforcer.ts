@@ -5,6 +5,7 @@ import { sha256 } from "../utils/hash.js";
 import { buildGlobalPolicy } from "./policy.js";
 import type { GlobalPolicy } from "./policy.js";
 import { matchToolCall } from "./matcher.js";
+import { CapabilityMatcherCache } from "./capability-matcher.js";
 import type { ActionBox, Violation, EnforcementMode } from "../types.js";
 import type { PluginLogger } from "../openclaw-sdk.js";
 
@@ -27,10 +28,13 @@ export class ActionBoxEnforcer {
   private policy: GlobalPolicy;
   private mode: EnforcementMode;
   private logger?: PluginLogger;
+  private capabilityCache = new CapabilityMatcherCache();
+  private capabilityModel?: string;
 
-  constructor(mode: EnforcementMode = "monitor", logger?: PluginLogger) {
+  constructor(mode: EnforcementMode = "monitor", logger?: PluginLogger, capabilityModel?: string) {
     this.mode = mode;
     this.logger = logger;
+    this.capabilityModel = capabilityModel;
     this.policy = buildGlobalPolicy([]);
   }
 
@@ -70,10 +74,13 @@ export class ActionBoxEnforcer {
    */
   private rebuildPolicy(): void {
     this.policy = buildGlobalPolicy(Array.from(this.boxes.values()));
+    this.capabilityCache.clear();
     this.logger?.debug(
       `ActionBox policy rebuilt: ${this.boxes.size} contracts, ` +
       `${this.policy.toolIndex.size} indexed tools, ` +
-      `${this.policy.globalDeniedTools.size} globally denied tools`,
+      `${this.policy.globalDeniedTools.size} globally denied tools, ` +
+      `${this.policy.allAllowedCapabilities.length} allowed capabilities, ` +
+      `${this.policy.allDeniedCapabilities.length} denied capabilities`,
     );
   }
 
@@ -103,8 +110,8 @@ export class ActionBoxEnforcer {
    * This is the main enforcement entry point, used by both
    * before_tool_call (blocking) and after_tool_call (monitoring) hooks.
    */
-  check(toolName: string, params: Record<string, unknown>): Violation[] {
-    return matchToolCall(toolName, params, this.policy);
+  async check(toolName: string, params: Record<string, unknown>): Promise<Violation[]> {
+    return matchToolCall(toolName, params, this.policy, this.capabilityCache, this.capabilityModel);
   }
 
   /**

@@ -49,6 +49,26 @@ export function buildSkillDirective(box: ActionBox): string {
     lines.push("    </never-do>");
   }
 
+  // Allowed capabilities
+  const allowedCaps = box.allowedCapabilities ?? [];
+  if (allowedCaps.length > 0) {
+    lines.push("    <allowed-capabilities>");
+    for (const cap of allowedCaps) {
+      lines.push(`      <capability>${escapeXml(cap)}</capability>`);
+    }
+    lines.push("    </allowed-capabilities>");
+  }
+
+  // Denied capabilities
+  const deniedCaps = box.deniedCapabilities ?? [];
+  if (deniedCaps.length > 0) {
+    lines.push("    <denied-capabilities>");
+    for (const cap of deniedCaps) {
+      lines.push(`      <capability>${escapeXml(cap)}</capability>`);
+    }
+    lines.push("    </denied-capabilities>");
+  }
+
   // Allowed tools
   if (box.allowedTools.length > 0) {
     const names = box.allowedTools.map((t) => t.name).join(", ");
