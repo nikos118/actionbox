@@ -227,9 +227,13 @@ drift:
 
 ### Enforcement Modes
 
+Runtime enforcement is optional and designed for specific situations where you need hard guardrails on tool calls. You can disable it entirely by leaving ActionBox in `monitor` mode (the default), or escalate to `enforce` mode when you need to actively block violations.
+
 **Monitor mode** (default) — violations are logged via `after_tool_call`, but skill execution continues. Good for rollout and tuning.
 
 **Enforce mode** — violations block the tool call via `before_tool_call` before it executes. Both hooks run simultaneously: `before_tool_call` for blocking, `after_tool_call` for logging.
+
+> **Recommendation:** Even if you disable runtime enforcement, we recommend keeping **context injection** enabled (it's on by default). Context injection gives the LLM awareness of its behavioral contract before it acts, which prevents most violations from happening in the first place. Runtime enforcement is a safety net; context injection is the first line of defense.
 
 ### Drift Detection
 
@@ -240,6 +244,8 @@ ActionBox hashes each `SKILL.md` when generating a contract. A background servic
 ## Context Injection
 
 ActionBox doesn't just enforce contracts reactively — it also **injects behavioral directives** into each agent's context before execution begins. This gives the LLM driving each skill awareness of its contract *before* it ever makes a tool call.
+
+Context injection is always on and works regardless of enforcement mode. We recommend leaving it enabled in all configurations — it's the most effective way to keep agents within their intended scope, because the LLM self-regulates rather than being blocked after the fact.
 
 ### How It Works
 
